@@ -119,7 +119,7 @@ def train(data_train, data_eval, model, nsp_loss, mlm_loss, vocab_size, ctx):
 
     logging.debug('Creating distributed trainer...')
     lr = args.lr
-    optim_params = {'learning_rate': lr, 'epsilon': 1e-6, 'wd': 0.01}
+    optim_params = {'learning_rate': lr, 'epsilon': 1e-6, 'wd': 0.01, 'bias_correction': False}
     if args.dtype == 'float16':
         optim_params['multi_precision'] = True
 
@@ -128,7 +128,7 @@ def train(data_train, data_eval, model, nsp_loss, mlm_loss, vocab_size, ctx):
         loss_scale_param = {'scale_window': 2000 / num_workers}
     else:
         loss_scale_param = None
-    trainer = hvd.DistributedTrainer(model.collect_params(), 'bertadam', optim_params)
+    trainer = hvd.DistributedTrainer(model.collect_params(), 'lamb', optim_params)
     fp16_trainer = FP16Trainer(trainer, dynamic_loss_scale=dynamic_loss_scale,
                                loss_scaler_params=loss_scale_param)
 
