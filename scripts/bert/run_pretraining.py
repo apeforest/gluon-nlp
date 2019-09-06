@@ -266,21 +266,19 @@ def train(data_train, data_eval, model):
             ns_label_list, ns_pred_list = [], []
             mask_label_list, mask_pred_list, mask_weight_list = [], [], []
 
-            with mx.autograd.record():
-                num_data = len(data_list)
-                for i in range(num_data):
-                    parallel.put(data_list[i])
-                for _ in range(num_data):
-                    (next_sentence_label, classified, masked_id,
-                     decoded, masked_weight, ls1, ls2, valid_length) = parallel.get()
-                    ns_label_list.append(next_sentence_label)
-                    ns_pred_list.append(classified)
-                    mask_label_list.append(masked_id)
-                    mask_pred_list.append(decoded)
-                    mask_weight_list.append(masked_weight)
-                    running_mlm_loss += ls1.as_in_context(mx.cpu()) / len(ctxs)
-                    running_nsp_loss += ls2.as_in_context(mx.cpu()) / len(ctxs)
-                    running_num_tks += valid_length.sum().as_in_context(mx.cpu())
+            for data in data_list:
+                parallel.put(data)
+            for _ in range(len(ctxs)):
+                (next_sentence_label, classified, masked_id,
+                 decoded, masked_weight, ls1, ls2, valid_length) = parallel.get()
+                ns_label_list.append(next_sentence_label)
+                ns_pred_list.append(classified)
+                mask_label_list.append(masked_id)
+                mask_pred_list.append(decoded)
+                mask_weight_list.append(masked_weight)
+                running_mlm_loss += ls1.as_in_context(mx.cpu()) / len(ctxs)
+                running_nsp_loss += ls2.as_in_context(mx.cpu()) / len(ctxs)
+                running_num_tks += valid_length.sum().as_in_context(mx.cpu())
 
             # update
             if (batch_num + 1) % accumulate == 0:
