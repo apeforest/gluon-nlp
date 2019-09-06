@@ -88,6 +88,8 @@ parser.add_argument('--eval_use_npz', action='store_true',
 parser.add_argument('--backend', type=str, default='device',
                     choices=['horovod', 'dist_sync_device', 'device'],
                     help='Communication backend.')
+parser.add_argument('--gpus', type=str, default='0',
+                    help='List of GPUs to use. e.g. 1,3')
 
 args = parser.parse_args()
 
@@ -96,6 +98,7 @@ level = logging.DEBUG if args.verbose else logging.INFO
 logging.getLogger().setLevel(level)
 logging.info(args)
 os.environ['MXNET_GPU_MEM_POOL_TYPE'] = 'Round'
+
 
 class DataParallelBERT(nlp.utils.Parallelizable):
     """Data parallel BERT model.
@@ -131,6 +134,7 @@ class DataParallelBERT(nlp.utils.Parallelizable):
         return next_sentence_label, classified, masked_id, decoded, \
                masked_weight, ls1, ls2, valid_length
 
+
 def init_comm(backend):
     """Init communication backend"""
     # backend specific implementation
@@ -154,12 +158,15 @@ def init_comm(backend):
         rank = store.rank
         local_rank = 0
         is_master_node = rank == local_rank
+
         ctxs = os.environ.get('NVIDIA_VISIBLE_DEVICES', '0')
         ctxs = [mx.gpu(int(ctx)) for ctx in ctxs.split(',')]
+
     return store, num_workers, rank, local_rank, is_master_node, ctxs
 
 backend = args.backend
 store, num_workers, rank, local_rank, is_master_node, ctxs = init_comm(backend)
+
 
 def train(data_train, data_eval, model):
     """Training function."""
@@ -172,7 +179,7 @@ def train(data_train, data_eval, model):
     mlm_metric.reset()
     nsp_metric.reset()
 
-    logging.debug('Creating distributed trainer...')
+    logging.info('Creating distributed trainer...')
     lr = args.lr
     optim_params = {'learning_rate': lr, 'epsilon': 1e-6, 'wd': 0.01}
     if args.dtype == 'float16':
@@ -228,7 +235,7 @@ def train(data_train, data_eval, model):
 
     parallel_model = DataParallelBERT(model, trainer=fp16_trainer)
     num_ctxes = len(ctxs)
-    parallel = nlp.utils.Parallel(num_ctxes if num_ctxes > 1 else 0, parallel_model)
+    parallel = nlp.utils.Parallel(0, parallel_model)
 
     while step_num < num_train_steps:
         for _, data_batch in enumerate(data_train):
@@ -312,6 +319,7 @@ def train(data_train, data_eval, model):
     mx.nd.waitall()
     train_end_time = time.time()
     logging.info('Train cost={:.1f}s'.format(train_end_time - train_begin_time))
+
 
 if __name__ == '__main__':
     random_seed = random.randint(0, 1000)
