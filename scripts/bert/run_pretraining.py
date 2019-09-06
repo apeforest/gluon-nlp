@@ -32,6 +32,7 @@ This example shows how to pre-train a BERT model with Gluon NLP Toolkit.
 
 import os
 import logging
+import functools
 import time
 
 import mxnet as mx
@@ -41,11 +42,47 @@ from fp16_utils import FP16Trainer
 from pretraining_utils import get_model_loss, get_pretrain_data_npz, get_dummy_dataloader
 from pretraining_utils import log, evaluate, forward, split_and_load, get_argparser
 from pretraining_utils import save_parameters, save_states, profile
+from pretraining_utils import get_pretrain_data_text, generate_dev_set
 
 # arg parser
 parser = get_argparser()
 parser.add_argument('--gpus', type=str, default='0', help='List of GPUs to use. e.g. 1,3')
 parser.add_argument('--kvstore', type=str, default='device', help='KVStore type')
+
+parser.add_argument('--raw', action='store_true',
+                    help='If set, both training and dev samples are generated on-the-fly '
+                         'from raw texts instead of pre-processed npz files. ')
+parser.add_argument('--max_seq_length', type=int, default=512,
+                    help='Maximum input sequence length. Effective only if --raw is set.')
+parser.add_argument('--short_seq_prob', type=float, default=0.1,
+                    help='The probability of producing sequences shorter than max_seq_length. '
+                         'Effective only if --raw is set.')
+parser.add_argument('--masked_lm_prob', type=float, default=0.15,
+                    help='Probability for masks. Effective only if --raw is set.')
+parser.add_argument('--max_predictions_per_seq', type=int, default=80,
+                    help='Maximum number of predictions per sequence. '
+                         'Effective only if --raw is set.')
+parser.add_argument('--cased', action='store_true',
+                    help='Whether to tokenize with cased characters. '
+                         'Effective only if --raw is set.')
+parser.add_argument('--whole_word_mask', action='store_true',
+                    help='Whether to use whole word masking rather than per-subword masking.'
+                         'Effective only if --raw is set.')
+parser.add_argument('--sentencepiece', default=None, type=str,
+                    help='Path to the sentencepiece .model file for both tokenization and vocab. '
+                         'Effective only if --raw is set.')
+parser.add_argument('--sp_nbest', type=int, default=0,
+                    help='Number of best candidates for sampling subwords with sentencepiece. '
+                         'Effective only if --raw is set.')
+parser.add_argument('--sp_alpha', type=float, default=1.0,
+                    help='Inverse temperature for probability rescaling for sentencepiece '
+                         'sampling. Effective only if --raw is set.')
+parser.add_argument('--num_data_workers', type=int, default=8,
+                    help='Number of workers to pre-process data. '
+                         'Effective only if --raw is set.')
+parser.add_argument('--eval_use_npz', action='store_true',
+                    help='Set to True if --data_eval provides npz files instead of raw text files')
+
 args = parser.parse_args()
 
 os.environ['MXNET_KVSTORE_USETREE'] = '1'
@@ -227,11 +264,41 @@ if __name__ == '__main__':
     store = mx.kv.create(args.kvstore)
     nlp.utils.mkdir(args.ckpt_dir)
 
+    if args.raw:
+        if args.sentencepiece:
+            tokenizer = nlp.data.BERTSPTokenizer(args.sentencepiece, vocab,
+                                                 num_best=args.sp_nbest,
+                                                 alpha=args.sp_alpha, lower=not args.cased)
+        else:
+            tokenizer = nlp.data.BERTTokenizer(vocab=vocab, lower=not args.cased)
+
+        cache_dir = os.path.join(args.ckpt_dir, 'data_eval_cache')
+        cache_file = os.path.join(cache_dir, 'part-000.npz')
+        nlp.utils.mkdir(cache_dir)
+
+        # generate dev dataset from the raw text if needed
+        if not args.eval_use_npz:
+            data_eval = cache_file
+            if not os.path.isfile(cache_file):
+                generate_dev_set(tokenizer, vocab, cache_file, args)
+
     if args.data:
         logging.info('Using training data at {}'.format(args.data))
+        if args.raw:
+            get_dataset_fn = functools.partial(get_pretrain_data_text,
+                                               max_seq_length=args.max_seq_length,
+                                               short_seq_prob=args.short_seq_prob,
+                                               masked_lm_prob=args.masked_lm_prob,
+                                               max_predictions_per_seq=args.max_predictions_per_seq,
+                                               whole_word_mask=args.whole_word_mask,
+                                               tokenizer=tokenizer,
+                                               num_workers=args.num_data_workers)
+        else:
+            get_dataset_fn = get_pretrain_data_npz
+
         num_parts = 1 if args.dummy_data_len else store.num_workers
         part_idx = 0 if args.dummy_data_len else store.rank
-        data_train = get_pretrain_data_npz(args.data, args.batch_size, len(ctx), True,
+        data_train = get_dataset_fn(args.data, args.batch_size, len(ctx), True,
                                            args.use_avg_len, args.num_buckets, vocab,
                                            num_parts=num_parts, part_idx=part_idx)
         train(data_train, model, nsp_loss, mlm_loss, len(vocab), ctx, store)
