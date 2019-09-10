@@ -88,6 +88,7 @@ parser.add_argument('--eval_use_npz', action='store_true',
 parser.add_argument('--backend', type=str, default='device',
                     choices=['horovod', 'dist_sync_device', 'device'],
                     help='Communication backend.')
+parser.add_argument('--gpus', type=str, default='0', help='List of GPUs to use. e.g. 1,3')
 
 args = parser.parse_args()
 
@@ -154,8 +155,8 @@ def init_comm(backend):
         rank = store.rank
         local_rank = 0
         is_master_node = rank == local_rank
-        ctxs = os.environ.get('NVIDIA_VISIBLE_DEVICES', '0')
-        ctxs = [mx.gpu(int(ctx)) for ctx in ctxs.split(',')]
+        ctxs = [mx.cpu()] if args.gpus is None or args.gpus == '' else \
+          [mx.gpu(int(x)) for x in args.gpus.split(',')]
     return store, num_workers, rank, local_rank, is_master_node, ctxs
 
 backend = args.backend
@@ -230,6 +231,7 @@ def train(data_train, data_eval, model):
     num_ctxes = len(ctxs)
     parallel = nlp.utils.Parallel(num_ctxes if num_ctxes > 1 else 0, parallel_model)
 
+    import pdb; pdb.set_trace()
     while step_num < num_train_steps:
         for _, data_batch in enumerate(data_train):
             if step_num >= num_train_steps:
@@ -261,7 +263,9 @@ def train(data_train, data_eval, model):
 
             with mx.autograd.record():
                 num_data = len(data_list)
+                logging.debug('num_data = {}'.format(num_data))
                 for i in range(num_data):
+                    logging.debug('process data {}'.format(i))
                     parallel.put(data_list[i])
                 for _ in range(num_data):
                     (next_sentence_label, classified, masked_id,
