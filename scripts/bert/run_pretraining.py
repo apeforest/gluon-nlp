@@ -231,7 +231,6 @@ def train(data_train, data_eval, model):
     num_ctxes = len(ctxs)
     parallel = nlp.utils.Parallel(num_ctxes if num_ctxes > 1 else 0, parallel_model)
 
-    import pdb; pdb.set_trace()
     while step_num < num_train_steps:
         for _, data_batch in enumerate(data_train):
             if step_num >= num_train_steps:
