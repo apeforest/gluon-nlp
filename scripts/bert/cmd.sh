@@ -4,7 +4,7 @@
 # 3) BERT fine-tune on SQuAD. This requires the checkpoint from (2).
 export DATA_HOME=~/mxnet-data/bert-pretraining/datasets
 
-export DEBUG="${DEBUG:-1}"
+export DEBUG="${DEBUG:-0}"
 export HOST="${HOST:-hosts_32}"
 export NP="${NP:-8}"
 export CKPTDIR="${CKPTDIR:-./test-ckpt}"
